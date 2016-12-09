@@ -6,9 +6,13 @@ from django.conf import settings
 from rest_framework import generics
 from rest_framework import status
 from rest_framework import viewsets
+from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAdminUser
+
+from report_builder.paginators import StandardResultsSetPagination
+from report_builder.serializers import ReportPreviewSerializer
 from .serializers import (
     ReportNestedSerializer, ReportSerializer, FormatSerializer,
     FilterFieldSerializer, ContentTypeSerializer, CloneSerializer)
@@ -21,7 +25,7 @@ def find_exact_position(fields_list, item):
     current_position = 0
     for i in fields_list:
         if (i.name == item.name and
-                i.get_internal_type() == item.get_internal_type()):
+                    i.get_internal_type() == item.get_internal_type()):
             return current_position
         current_position += 1
     return -1
@@ -66,7 +70,6 @@ class ReportNestedViewSet(viewsets.ModelViewSet):
 
 
 class RelatedFieldsView(GetFieldsMixin, APIView):
-
     """ Get related fields from an ORM model
     """
     permission_classes = (IsAdminUser,)
@@ -84,7 +87,7 @@ class RelatedFieldsView(GetFieldsMixin, APIView):
             self.model_class,
             self.field,
             self.path,
-            self.path_verbose,)
+            self.path_verbose, )
         result = []
         for new_field in new_fields:
             included_model = True
@@ -102,7 +105,7 @@ class RelatedFieldsView(GetFieldsMixin, APIView):
                 includes = getattr(settings, 'REPORT_BUILDER_INCLUDE')
                 # If it is not included as 'foo' and not as 'demo_models.foo'
                 if (model_name not in includes and
-                        model_information not in includes):
+                            model_information not in includes):
                     included_model = False
             if getattr(settings, 'REPORT_BUILDER_EXCLUDE', False):
                 excludes = getattr(settings, 'REPORT_BUILDER_EXCLUDE')
@@ -126,7 +129,6 @@ class RelatedFieldsView(GetFieldsMixin, APIView):
 
 
 class FieldsView(RelatedFieldsView):
-
     """ Get direct fields and properties on an ORM model
     """
     permission_classes = (IsAdminUser,)
@@ -137,7 +139,7 @@ class FieldsView(RelatedFieldsView):
             self.model_class,
             self.field,
             self.path,
-            self.path_verbose,)
+            self.path_verbose, )
 
         # External packages might cause duplicates. This clears it up
         new_set = []
@@ -190,10 +192,10 @@ class FieldsView(RelatedFieldsView):
                 'field_verbose': verbose_name,
                 'field_type': new_field.get_internal_type(),
                 'is_default': True if defaults is None or
-                new_field.name in defaults else False,
+                                      new_field.name in defaults else False,
                 'field_choices': new_field.choices,
                 'can_filter': True if filters is None or
-                new_field.name in filters else False,
+                                      new_field.name in filters else False,
                 'path': field_data['path'],
                 'path_verbose': field_data['path_verbose'],
                 'help_text': new_field.help_text,
@@ -216,14 +218,14 @@ class FieldsView(RelatedFieldsView):
                         'field_type': 'Property',
                         'field_choices': None,
                         'can_filter': True if filters is None or
-                        field in filters else False,
+                                              field in filters else False,
                         'path': field_data['path'],
                         'path_verbose': field_data['path_verbose'],
                         'is_default': True if defaults is None or
-                        field in defaults else False,
+                                              field in defaults else False,
                         'help_text': 'Adding this property will '
-                        'significantly increase the time it takes to run a '
-                        'report.'
+                                     'significantly increase the time it takes to run a '
+                                     'report.'
                     }]
         # Add custom fields
         custom_fields = field_data.get('custom_fields', None)
@@ -236,14 +238,42 @@ class FieldsView(RelatedFieldsView):
                     'field_type': 'Custom Field',
                     'field_choices': getattr(field, 'choices', None),
                     'can_filter': True if filters is None or
-                    field.name in filters else False,
+                                          field.name in filters else False,
                     'path': field_data['path'],
                     'path_verbose': field_data['path_verbose'],
                     'is_default': True if defaults is None or
-                    field.name in defaults else False,
+                                          field.name in defaults else False,
                     'help_text': 'This is a custom field.',
                 }]
         return Response(result)
+
+
+class GeneratePreview(DataExportMixin, RetrieveAPIView):
+    permission_classes = (IsAdminUser,)
+    serializer_class = ReportPreviewSerializer
+
+    def get_queryset(self):
+        return None
+
+    def get_object(self):
+        report_id = self.kwargs['report_id']
+        report = get_object_or_404(Report, pk=report_id)
+        page = int(self.kwargs['page'])
+
+        objects_list = report.paginated_report_to_list(
+            user=self.request.user,
+            preview=True,
+            page_number=page
+        )
+        display_fields = report.get_good_display_fields().values_list(
+            'name', flat=True)
+
+        response = {
+            'data': objects_list,
+            'meta': {'titles': display_fields},
+        }
+        return response
+
 
 
 class GenerateReport(DataExportMixin, APIView):
@@ -257,7 +287,7 @@ class GenerateReport(DataExportMixin, APIView):
 
         objects_list = report.report_to_list(
             user=request.user,
-            preview=True,)
+            preview=True, )
         display_fields = report.get_good_display_fields().values_list(
             'name', flat=True)
         response = {
@@ -267,7 +297,8 @@ class GenerateReport(DataExportMixin, APIView):
 
         return Response(response)
 
-class CloneReport (generics.CreateAPIView):
+
+class CloneReport(generics.CreateAPIView):
     """
     Copy a report including related fields and set a name
     """
@@ -280,6 +311,7 @@ class CloneReport (generics.CreateAPIView):
         self.perform_create(serializer)
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
 
 class ReportDownloadedView(generics.ListAPIView):
     """
